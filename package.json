@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "prismarine-nbt": "^2.5.0",
+    "skyhelper-networth": "^1.18.5"
+  }
+}
