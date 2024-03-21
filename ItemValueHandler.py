@@ -5,6 +5,9 @@ import subprocess
 import json
 from io import BytesIO
 
+import requests
+
+
 def decode_data(string):
     try:
         # Decode the base64 string
@@ -19,20 +22,32 @@ def decode_data(string):
         if "PartialReadError" in str(error):
             logging.error("The NBT data may be corrupted or incorrectly formatted.")
         return None
-def get_item_networth(item):
+
+
+def get_item_networth(input):
+    # Extract the first item from the 'i' property of the input
+    item = input['i'][0]
+
     # Convert the Python dictionary to a JSON string
     item_json = json.dumps(item)
 
-    # Call the Node.js script with the NBT data as a command line argument
-    subprocess.run(['node', 'Evaluator.js', item_json])
+    # Load the prices JSON from the URL
+    response = requests.get('https://raw.githubusercontent.com/SkyHelperBot/Prices/main/prices.json')
+    prices = response.json()
 
-    # Read the networth from the output file
-    with open('output.json', 'r') as file:
-        networth = json.load(file)
+    # Combine the item and prices into a single dictionary
+    data = {'item': item, 'prices': prices}
 
-    return networth
+    # Convert the dictionary to a JSON string
+    data_json = json.dumps(data)
 
-item_bytes = 'H4sIAAAAAAAAAI1U3W4aRxQ+GJIAsVRVbZRWSqKJmrSmtglrMHh9EQkv2EEhdsQ6rnKFBvawO2J2h+zMOslL5A160174PfwofZCqZxawHFWqysUy853v/Mw530wVoAIFUQWAwgZsiKBwvwB3PJUlplCFouFhBUqYTCOwvwLcf5dMUuRzPpFYKELllQjwWPJQk/XvKtwLhF5I/pmchirFMqE/wpPrq84J8pT5U8IO2fVV0HT26e9gq9l0a/CI7D0e8zC3TbedRiM3bjtOowbPyOqbFJPQREv7vjW7W9ut2pK2v1+DLWJ5qTDMi3gyXQVqPV8Rn6+YtIBf18zbKf/NrFvuC+IeqSTTrGsMn86Zv0AM/iP4DjkMEoNSihBXdfBtp9P+umLHbdbbNWrOS4L7nxaYCstmg8GAgB0idY5Fqg2jg4s54Rcr2D0RPDHstZASU3YBewQNxQyJiFze8neHShmRhF9BGZ3gAlq09Kf8kjpqY6ytfsTTRYJa30CdCx4vRCp0TF4APxFCB3+vMhYolijDIgrCOItEGDFMVBZG8DMx+iQXqtJml3iJkhnFMo1MqxiZmjETITwmHi55MSZGM5UQLjQTBuOnlI0G2u5OhBTm8yHrkeQCqdKAUVl4fSVHg5NX58wbDrzXULMCiei4VIqeZ5LyRdywgBqibfudnUazUXeJBVX6BPnY6/AdTeINTzjzlDZ2Ts1Wg/LW81O2/vr9TzvlEX7IRIo2ztTjJAEVTzTz59R/1iSsDp3/zXdci36MhEQmEvieNucRshtaHu4H6r09X3fUZ713pyf9s1Pm/3Y26pWhdMpjhIdEOOYivdUT/yN9oQrf9D+ZlJNSUzHJDOoyfBtkNGSVjLWtYJziB9j0uudd7+zNkX/ouEV4OOEafcPNkaI2vMWUpkKXHqkTT8tQjlUgZgJTKM0oZ9k+EPDAG71/ez7ujfrd3pAqG+f1VWHz9jyLUJIkNwpzpwibMyvmsc7FTFCpCPfkUp+0K9IzotfiWzpU9Fqfy30Vb+7IyuFyLc0VQdIloAQ08yVhM7QXZTzPL4rlADUwy6j8Z52D9ox3nL1dN2g1d1u81abVHt91ndbMdfnB5GCvQRmsEMdG5N53S1AxIkZtKC09g19+iV/+AbABd5ePiH0b/wF4s7i3SgUAAA\u003d\u003d'
+    # Convert the JSON string to bytes
+    data_bytes = data_json.encode()
+
+    # Call the Node.js script and pass the JSON string via stdin
+    subprocess.run(['node', 'Evaluator.js'], input=data_bytes)
+
+item_bytes = 'H4sIAAAAAAAAAF1TzW7TQBCeNCk0gVIEAg5I1SBRAYrSOm0ap721Tfoj9Qc1UAkhVK3tib2qvRt5N5S+AacKBCcE57xH3oQeeAzEOEl/xMHjndnvm/l2NFMCKEJOlgAgNwETMshVcjC5oXvK5kqQtyLMwZ23yktJnAgvplweitsyoM1YhIZJf0twO5CmG4uzIhR2dUpTHH0KDwd9t21TUqGNVnHQ98tLDjzh4EYqLTZFIkIaxRedOXjAF9sk4hFWlKsMzmJN6pAyNArWHHjMsR1lKY5lSMofXyzDLP8b7/m7+PGd7Yf/XFY0M+h7TZ1IJZiGO0dQ4VRbQqqhhvoc/9xgqApPI1IoLHZ6cYzRUNU83GP+nlACX2sd4xHMZfRUKGuY6ZWrjnPx8xxvamPAPBeeZQFvJKUU4LpWPbOKQxk9gy+dhdoraDBuU6dIHyk9w4RiIjyRXDkci6tm0owV/gnqDp/rYz6U+Pz715dhnTxbcNm0hB/dACEDrvnhpWAqO/PVi2+fsX0qVQh3OXIoVEjXuRbZrNlhfecqgUERG81uYE5ll7I4axTIaQOdwELWQ5mSb6VWGElrOfn4YaQoOUNG24iwK2zEj4FpJmT+MNu4cJ3NrjaEVRyJFh1LaSaklil3uQdK22F3suxihMo6nd1mzY6kQWkpQV8o9AhT6ug0pOAZPOLGDPrxbmurtd9cO3yH6wcHb9p5mPR1rFP404YpKOyLhOA+I3lSE8MPWdfacrdhpvXJpmLN2lR6PUumBCVx5fBaBJfjxVoK7Cc8LsddHhf2JzkzLxdMbxzu7LUP9o/HlYueNubY8nxkJK7e6zHqed1Z9Nx6o1FZocZSpba8RJUVt+pU/E7N9QJqeG7HKUDRyoT4+UmXl/f8xdegBTABt0bLxfngH8By43zdAwAA'
 decoded_item = decode_data(item_bytes)
 get_item_networth(decoded_item)
 print(get_item_networth(decoded_item))
