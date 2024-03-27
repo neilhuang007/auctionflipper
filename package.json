@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "mongodb": "^6.5.0",
     "prismarine-nbt": "^2.5.0",
     "skyhelper-networth": "^1.18.5"
   }
