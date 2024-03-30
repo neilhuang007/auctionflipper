@@ -15,3 +15,5 @@ db = client['skyblock']
 
 # Connect to the 'Auctions' collection
 auctions = db['Auctions']
+
+flips = db['Flips']

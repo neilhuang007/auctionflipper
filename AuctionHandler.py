@@ -3,7 +3,7 @@ from pymongo import MongoClient
 import requests
 import concurrent.futures
 import orjson
-from tqdm import tqdm
+
 import time
 
 import DataBaseHandler
@@ -39,8 +39,10 @@ def process_auction(auction):
 
         # # Insert the item into the database
         DataBaseHandler.auctions.insert_one(item)
-        # Do the evaluation of item and pass it as a json to the nodejs script
-        ItemValueHandler.get_item_networth(item)
+
+        # # Do the evaluation of item and pass it as a json to the nodejs script
+        ItemValueHandler.get_item_networth(auction)
+
         return item
     else:
         return None
@@ -49,9 +51,29 @@ def process_page(page):
     # Make a GET request to the API for the given page
     response = requests.get(f'https://api.hypixel.net/skyblock/auctions?page={page}')
     data = orjson.loads(response.content)
+    for i in range(0, len(data['auctions'])):
+        process_auction(data['auctions'][i])
+
+    # with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+    #     # Remove tqdm() to disable the progress bar
+    #     executor.map(process_auction, data['auctions'])
+
+def CheckAuctions():
+    # Make a GET request to the API to get the total number of pages
+    logger.debug('Making request to API...')
+    response = requests.get('https://api.hypixel.net/skyblock/auctions')
+    data = orjson.loads(response.content)
+    total_pages = data['totalPages']
+    logger.debug(f'Received response from API. Total pages: {total_pages}')
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
-        # Wrap the iterable with tqdm() to show a progress bar
-        executor.map(process_auction, tqdm(data['auctions']))
+        # Remove tqdm() to disable the progress bar
+        futures = {executor.submit(process_page, page) for page in range(total_pages)}
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
+    logger.debug('Finished processing all pages.')
+    return True
 
 def delete_ended_auctions():
     # Make a GET request to the API to get the ended auctions
@@ -66,17 +88,5 @@ def delete_ended_auctions():
             # Delete the auction from the MongoDB collection
             DataBaseHandler.auctions.delete_one({'uuid': auction['auction_id']})
             logger.debug(f'Deleted auction {auction["auction_id"]} from the database.')
-
-def CheckAuctions():
-    # Make a GET request to the API to get the total number of pages
-    logger.debug('Making request to API...')
-    response = requests.get('https://api.hypixel.net/skyblock/auctions')
-    data = orjson.loads(response.content)
-    total_pages = data['totalPages']
-    logger.debug(f'Received response from API. Total pages: {total_pages}')
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
-        # Wrap the iterable with tqdm() to show a progress bar
-        futures = {executor.submit(process_page, page) for page in tqdm(range(total_pages), desc="Processing auctions")}
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
+    logger.debug('Finished deleting ended auctions.')
+    return True
