@@ -8,12 +8,11 @@ import sys
 
 import requests
 
-import DataBaseHandler
-import PriceHandler
+from Handlers import PriceHandler, DataBaseHandler
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+# # Set up logging
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
 
 prices = {}
 
@@ -55,8 +54,8 @@ def get_item_networth(itemstats):
 
     # Call the Node.js script and pass the JSON string via stdin
     result = subprocess.run(['node', 'Evaluator.js'], input=data_bytes,capture_output=True)  # Capture output and error messages
-
-    print("evaluated value: " + (result.stdout.decode().strip().split('|')[0]))
+    #
+    # print("evaluated value: " + (result.stdout.decode().strip().split('|')[0]))
 
     if(float(result.stdout.decode().strip().split('|')[0]) > itemstats['starting_bid']):
 
@@ -77,7 +76,7 @@ def get_item_networth(itemstats):
         # Calculate the percentage
         percentage = price_margin * 100
 
-        print('found profitable flip, auction id: ' + str(itemstats['uuid']) + ' profit: ' + str(profit) + ' price margin: ' + str(price_margin) + ' percentage: ' + str(percentage) + '%')
+        # print('found profitable flip, auction id: ' + str(itemstats['uuid']) + ' profit: ' + str(profit) + ' price margin: ' + str(price_margin) + ' percentage: ' + str(percentage) + '%')
 
         # Insert the itemstats, profit, price margin, and percentage into the flips collection
         try:
@@ -86,12 +85,13 @@ def get_item_networth(itemstats):
                 'profit': profit,
                 'daily_sales': dailysales,
                 'lowest_bin': lowestbin,
-                'percentage': percentage
+                'percentage': percentage,
+                'targeted_price': networth
             })
         except Exception as e:
             print("Error inserting into MongoDB:", e)
 
-        print('Insertion successfull')
+        # print('Insertion successfull')
     return True
 
 # itemjson = {

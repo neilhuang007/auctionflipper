@@ -1,4 +1,7 @@
+import asyncio
 import logging
+
+import aiohttp
 from pymongo import MongoClient
 import requests
 import concurrent.futures
@@ -6,12 +9,12 @@ import orjson
 
 import time
 
-import DataBaseHandler
-import ItemValueHandler
+from Handlers import ItemValueHandler, DataBaseHandler, ProgressHandler
+
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
 
 def process_auction(auction):
     # Check if 'bin' is true and the auction is not already in the database
@@ -42,51 +45,54 @@ def process_auction(auction):
 
         # # Do the evaluation of item and pass it as a json to the nodejs script
         ItemValueHandler.get_item_networth(auction)
-
+        ProgressHandler.updatepbar(1)
         return item
     else:
+        ProgressHandler.updatepbar(1)
         return None
 
-def process_page(page):
-    # Make a GET request to the API for the given page
-    response = requests.get(f'https://api.hypixel.net/skyblock/auctions?page={page}')
-    data = orjson.loads(response.content)
-    for i in range(0, len(data['auctions'])):
-        process_auction(data['auctions'][i])
+async def fetch(session, url):
+    async with session.get(url) as response:
+        return await response.text()
 
-    # with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-    #     # Remove tqdm() to disable the progress bar
-    #     executor.map(process_auction, data['auctions'])
+async def process_page(page):
+    async with aiohttp.ClientSession() as session:
+        response = await fetch(session, f'https://api.hypixel.net/skyblock/auctions?page={page}')
+        data = orjson.loads(response)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
+            executor.map(process_auction, data['auctions'])
 
-def CheckAuctions():
-    # Make a GET request to the API to get the total number of pages
-    logger.debug('Making request to API...')
-    response = requests.get('https://api.hypixel.net/skyblock/auctions')
-    data = orjson.loads(response.content)
-    total_pages = data['totalPages']
-    logger.debug(f'Received response from API. Total pages: {total_pages}')
+async def CheckAuctions():
+    print('Making request to API...')
+    async with aiohttp.ClientSession() as session:
+        response = await fetch(session, 'https://api.hypixel.net/skyblock/auctions')
+        data = orjson.loads(response)
+        total_pages = data['totalPages']
+        totalAuctions = data['totalAuctions']
+        print(f'Received response from API. Total pages: {total_pages}')
+        ProgressHandler.createpbar(totalAuctions)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
-        # Remove tqdm() to disable the progress bar
-        futures = {executor.submit(process_page, page) for page in range(total_pages)}
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            futures = {executor.submit(asyncio.run, process_page(page)) for page in range(total_pages)}
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
 
-    logger.debug('Finished processing all pages.')
+    print('Finished processing all pages.')
     return True
 
 def delete_ended_auctions():
     # Make a GET request to the API to get the ended auctions
-    logger.debug('Making request to API to get ended auctions...')
+    print('Making request to API to get ended auctions...')
     response = requests.get('https://api.hypixel.net/v2/skyblock/auctions_ended')
     data = orjson.loads(response.content)
 
     # Iterate over the auctions
     for auction in data['auctions']:
         # Check if the auction ended in the last 60 seconds
-        if auction['uuid'] in DataBaseHandler.auctions.find_one({'uuid': auction['uuid']}):
+        db_auction = DataBaseHandler.auctions.find_one({'uuid': auction['uuid']})
+        if db_auction and auction['uuid'] == db_auction['uuid']:
             # Delete the auction from the MongoDB collection
             DataBaseHandler.auctions.delete_one({'uuid': auction['auction_id']})
-            logger.debug(f'Deleted auction {auction["auction_id"]} from the database.')
-    logger.debug('Finished deleting ended auctions.')
+            print(f'Deleted auction {auction["auction_id"]} from the database.')
+    print('Finished deleting ended auctions.')
     return True

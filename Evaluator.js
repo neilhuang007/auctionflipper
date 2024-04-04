@@ -37,17 +37,16 @@ process.stdin.on('end', () => {
   const inputData = JSON.parse(data);
 
   // Extract the item, prices, and price properties from the inputData object
-  const { item, prices} = inputData;
+  const {item, prices} = inputData;
 
     // Call the getItemNetworth function with your own prices
     getItemNetworth(item, {prices: prices, returnItemData: true})
         .then(networth => {
             console.log(networth.price + "|" + networth.id)
-            throw (networth.id)
+            process.exit(0);
     })
     .catch(error => {
       // Print the error message
       console.error('Error in getItemNetworth:', error);
-      throw error; // Rethrow the error after logging
     });
 });

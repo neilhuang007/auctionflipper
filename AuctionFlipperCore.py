@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -8,23 +9,11 @@ import time
 
 from pymongo import MongoClient
 
-import AuctionHandler
-import PriceHandler
+from Handlers import PriceHandler, AuctionHandler
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-# Create a MongoDB client
-logger.debug('Connecting to MongoDB...')
-client = MongoClient('mongodb://localhost:27017/')
-logger.debug('Connected to MongoDB.')
-
-# Connect to the 'Skyblock' database
-db = client['skyblock']
-
-# Connect to the 'Auctions' collection
-auctions = db['Auctions']
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
 
 def UpdateCachedPrices():
     # Load the prices JSON from the URL
@@ -77,13 +66,25 @@ def UpdateDailySales():
 
 
 
-# # Keep the script running
+
+# Keep the script running
 while True:
     UpdateCachedPrices()
     UpdateDailySales()
     UpdateLowestBin()
-    # Call CheckAuctions and wait for it to finish
-    AuctionHandler.CheckAuctions()
+    PriceHandler.readprices()
+
+    # Create a new event loop
+    loop = asyncio.new_event_loop()
+    # Set the event loop for the current OS thread
+    asyncio.set_event_loop(loop)
+    try:
+        # Call CheckAuctions and wait for it to finish
+        loop.run_until_complete(AuctionHandler.CheckAuctions())
+    finally:
+        # Close the event loop
+        loop.close()
+
     print('auctions updated')
     AuctionHandler.delete_ended_auctions()
     print('auctions deleted')
