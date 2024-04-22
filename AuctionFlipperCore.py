@@ -3,13 +3,17 @@ import json
 import logging
 import os
 
+import aiohttp
+import orjson
 import requests
 import schedule
 import time
 
 from pymongo import MongoClient
 
-from Handlers import PriceHandler, AuctionHandler
+from Handlers import PriceHandler, AuctionHandler, ProgressHandler
+from Handlers.AuctionHandler import fetch
+
 
 # Set up logging
 # logging.basicConfig(level=logging.INFO)
@@ -64,8 +68,30 @@ def UpdateDailySales():
         # delete everything in old one and substitute with new json
         json.dump(prices, f)
 
+async def initial_launch():
+    print('intital launch, Checking Whole DataBase')
+    UpdateCachedPrices()
+    UpdateDailySales()
+    UpdateLowestBin()
+    PriceHandler.readprices()
+    async with aiohttp.ClientSession() as session:
+        response = await fetch(session, 'https://api.hypixel.net/skyblock/auctions')
+        data = orjson.loads(response)
+        total_pages = data['totalPages']
+    await AuctionHandler.CheckAuctions(total_pages)
 
+# Create a new event loop
+loop = asyncio.new_event_loop()
+# Set the event loop for the current OS thread
+asyncio.set_event_loop(loop)
+try:
+    # Call initial_launch and wait for it to finish
+    loop.run_until_complete(initial_launch())
+finally:
+    # Close the event loop
+    loop.close()
 
+print('Initial Launch Finished')
 
 # Keep the script running
 while True:
@@ -80,11 +106,10 @@ while True:
     asyncio.set_event_loop(loop)
     try:
         # Call CheckAuctions and wait for it to finish
-        loop.run_until_complete(AuctionHandler.CheckAuctions())
+        loop.run_until_complete(AuctionHandler.CheckAuctions(2))
     finally:
         # Close the event loop
         loop.close()
-
     print('auctions updated')
     AuctionHandler.delete_ended_auctions()
     print('auctions deleted')

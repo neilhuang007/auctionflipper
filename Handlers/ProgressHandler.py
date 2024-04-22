@@ -6,5 +6,9 @@ def createpbar(totalauction):
     global pbar
     pbar = tqdm(total=totalauction, desc="Processing all auctions")
 
+
 def updatepbar(amount):
-    pbar.update(1);
+    pbar.update(amount);
+
+def deletepbar():
+    pbar.close()

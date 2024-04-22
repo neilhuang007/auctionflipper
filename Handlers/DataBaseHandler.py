@@ -17,3 +17,21 @@ db = client['skyblock']
 auctions = db['Auctions']
 
 flips = db['Flips']
+
+AuctionInsertion = []
+
+
+def bulk_insert_auctions():
+    global AuctionInsertion
+    if len(AuctionInsertion) == 0:
+        return
+    # Use Motor's insert_many method for bulk insertion
+    result = auctions.insert_many(AuctionInsertion)
+    print(f'Inserted {len(result.inserted_ids)} documents')
+    AuctionInsertion = []
+
+
+def InsertAuction(auction):
+    global AuctionInsertion
+    AuctionInsertion.append(auction)
+
