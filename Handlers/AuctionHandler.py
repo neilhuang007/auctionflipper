@@ -60,11 +60,12 @@ async def process_page(page):
         response = await fetch(session, f'https://api.hypixel.net/skyblock/auctions?page={page}')
         data = orjson.loads(response)
 
-        # Get all auction UUIDs from the database and store them in a set
-        existing_auctions_uuids = set(auction['uuid'] for auction in DataBaseHandler.auctions.find({}))
-
+        # Efficiently check which auctions already exist using optimized batch query
+        auction_uuids = [auction['uuid'] for auction in data['auctions']]
+        existing_auctions_uuids = DataBaseHandler.bulk_check_existing_auctions(auction_uuids)
+        
         # Count the number of auctions that already exist in the database
-        existing_auctions_count = sum(1 for auction in data['auctions'] if auction['uuid'] in existing_auctions_uuids)
+        existing_auctions_count = len(existing_auctions_uuids)
 
         # Filter out auctions that already exist in the database
         data['auctions'] = [auction for auction in data['auctions'] if auction['uuid'] not in existing_auctions_uuids]
@@ -105,17 +106,19 @@ def delete_ended_auctions():
     print('Making request to API to get ended auctions...')
     response = requests.get('https://api.hypixel.net/v2/skyblock/auctions_ended')
     data = orjson.loads(response.content)
-    deleted = 0
-    # Iterate over the auctions
-    for auction in data['auctions']:
-        # Check if the auction ended in the last 60 seconds
-        db_auction = DataBaseHandler.auctions.find_one({'uuid': auction['auction_id']})
-        if db_auction and auction['auction_id'] == db_auction['uuid']:
-            # Delete the auction from the MongoDB collection
-            DataBaseHandler.auctions.delete_one({'uuid': auction['auction_id']})
-            deleted += 1
-    print(f'Deleted {deleted} auctions from the database.')
-
+    
+    # Collect all ended auction UUIDs
+    ended_auction_ids = [auction['auction_id'] for auction in data['auctions']]
+    
+    # Check which of these auctions exist in our database using batch query
+    existing_ended_uuids = DataBaseHandler.bulk_check_existing_auctions(ended_auction_ids)
+    
+    if existing_ended_uuids:
+        # Use bulk delete operation for efficiency
+        deleted_count = DataBaseHandler.bulk_delete_auctions(list(existing_ended_uuids))
+        print(f'Deleted {deleted_count} ended auctions from the database.')
+    else:
+        print('No ended auctions found in database to delete.')
 
     print('Finished deleting ended auctions.')
     return True
