@@ -33,7 +33,9 @@ def start_evaluation_service():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
-            bufsize=1
+            bufsize=1,
+            encoding='utf-8',
+            errors='replace'
         )
         
         # Wait for service to start
@@ -69,7 +71,9 @@ def start_python_application(optimized=True):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
-            bufsize=1
+            bufsize=1,
+            encoding='utf-8',
+            errors='replace'
         )
         return process
     except Exception as e:
@@ -81,7 +85,14 @@ def monitor_process(process, name):
     try:
         for line in iter(process.stdout.readline, ''):
             if line:
-                print(f"[{name}] {line.rstrip()}")
+                # Handle any remaining encoding issues
+                try:
+                    clean_line = line.rstrip()
+                    print(f"[{name}] {clean_line}")
+                except UnicodeError:
+                    # Fallback for any remaining encoding issues
+                    clean_line = line.encode('utf-8', errors='replace').decode('utf-8').rstrip()
+                    print(f"[{name}] {clean_line}")
         process.wait()
     except Exception as e:
         print(f"❌ Error monitoring {name}: {e}")

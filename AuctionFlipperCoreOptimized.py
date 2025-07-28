@@ -79,7 +79,13 @@ class OptimizedAuctionFlipper:
             try:
                 async with self.session.get(url) as response:
                     if response.status == 200:
-                        data = await response.json()
+                        # Get raw text and parse as JSON manually to handle mimetype issues
+                        text_content = await response.text()
+                        try:
+                            data = orjson.loads(text_content)
+                        except orjson.JSONDecodeError:
+                            # Fallback to standard json if orjson fails
+                            data = json.loads(text_content)
                         
                         # Ensure directory exists
                         os.makedirs('cached', exist_ok=True)
@@ -143,7 +149,13 @@ class OptimizedAuctionFlipper:
         
         try:
             async with self.session.get('https://api.hypixel.net/skyblock/auctions') as response:
-                data = await response.json()
+                # Handle potential mimetype issues with Hypixel API too
+                text_content = await response.text()
+                try:
+                    data = orjson.loads(text_content)
+                except orjson.JSONDecodeError:
+                    data = json.loads(text_content)
+                
                 total_pages = data.get('totalPages', 0)
                 total_auctions = data.get('totalAuctions', 0)
                 
@@ -157,12 +169,25 @@ class OptimizedAuctionFlipper:
         max_concurrent = perf_config.get("max_concurrent_pages", 12)
         stats = await check_auctions_parallel(total_pages, max_concurrent=max_concurrent)
         
+        # After processing new auctions, re-evaluate ALL existing auctions for profit opportunities
+        print(f'\n🔄 Re-evaluating all existing auctions with updated prices...')
+        reeval_start = time.perf_counter()
+        
+        from Handlers.AuctionHandlerOptimized import reevaluate_all_existing_auctions
+        existing_flips = await reevaluate_all_existing_auctions()
+        
+        reeval_time = time.perf_counter() - reeval_start
+        total_flips = stats.get('profitable_flips', 0) + existing_flips
+        
         launch_time = time.perf_counter() - start_time
         
+        print(f'✅ Re-evaluation completed in {reeval_time:.2f}s')
         print(f'✅ Initial launch completed in {launch_time:.2f}s')
-        print(f'📈 Found {stats.get("profitable_flips", 0):,} profitable flips')
+        print(f'📈 Found {stats.get("profitable_flips", 0):,} flips from new auctions')
+        print(f'📈 Found {existing_flips:,} flips from existing auctions')
+        print(f'💰 Total profitable flips: {total_flips:,}')
         
-        self.stats['total_flips_found'] += stats.get('profitable_flips', 0)
+        self.stats['total_flips_found'] += total_flips
         
         return {
             'launch_time': launch_time,
@@ -187,8 +212,27 @@ class OptimizedAuctionFlipper:
             except Exception as e:
                 print(f"❌ Error reloading cached prices: {e}")
         
-        # Process only first 2 pages for monitoring (as per original logic)
-        stats = await check_auctions_parallel(2, max_concurrent=4)
+        # Get current total pages for complete monitoring
+        if not self.session:
+            connector = aiohttp.TCPConnector(limit=20)
+            timeout = aiohttp.ClientTimeout(total=30)
+            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        
+        try:
+            async with self.session.get('https://api.hypixel.net/skyblock/auctions') as response:
+                text_content = await response.text()
+                try:
+                    data = orjson.loads(text_content)
+                except orjson.JSONDecodeError:
+                    data = json.loads(text_content)
+                current_total_pages = data.get('totalPages', 2)
+        except Exception as e:
+            print(f"❌ Error getting current page count: {e}")
+            current_total_pages = 2  # Fallback
+        
+        # Process ALL pages but only evaluate NEW auctions (not in database)
+        print(f"🔍 Monitoring all {current_total_pages} pages for new auctions...")
+        stats = await check_auctions_parallel(current_total_pages, max_concurrent=8)
         
         # Clean up ended auctions
         deleted_count = delete_ended_auctions_optimized()

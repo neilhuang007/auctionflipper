@@ -53,7 +53,12 @@ async def fetch_page_data(session: aiohttp.ClientSession, page: int) -> Dict[str
         async with session.get(url) as response:
             if response.status == 200:
                 text = await response.text()
-                return orjson.loads(text)
+                try:
+                    return orjson.loads(text)
+                except orjson.JSONDecodeError:
+                    # Fallback to standard json if orjson fails
+                    import json
+                    return json.loads(text)
             else:
                 logging.error(f"Failed to fetch page {page}: HTTP {response.status}")
                 return {'auctions': []}
@@ -167,13 +172,20 @@ async def check_auctions_parallel(total_pages: int, max_concurrent: int = None) 
     # Get initial data for progress tracking
     try:
         initial_data = await fetch_page_data(session, 0)
-        total_auctions = initial_data.get('totalAuctions', 0)
-        print(f'📊 Total auctions to process: {total_auctions:,}')
-        ProgressHandler.createpbar(total_auctions)
+        total_auctions_available = initial_data.get('totalAuctions', 0)
+        
+        # Calculate actual auctions we'll process (pages * ~1000 per page)
+        estimated_auctions_to_process = total_pages * 1000
+        actual_auctions_to_process = min(estimated_auctions_to_process, total_auctions_available)
+        
+        print(f'📊 Total auctions available: {total_auctions_available:,}')
+        print(f'📊 Processing {total_pages} pages (~{actual_auctions_to_process:,} auctions)')
+        
+        ProgressHandler.createpbar(actual_auctions_to_process)
     except Exception as e:
         logging.error(f"Error getting initial auction data: {e}")
-        total_auctions = 0
-        ProgressHandler.createpbar(1000)  # Fallback
+        estimated_auctions = total_pages * 1000
+        ProgressHandler.createpbar(estimated_auctions)  # Fallback
     
     # Process pages in batches to control concurrency
     semaphore = asyncio.Semaphore(max_concurrent)
@@ -230,7 +242,7 @@ async def check_auctions_parallel(total_pages: int, max_concurrent: int = None) 
     
     # Print summary
     print(f'✅ Parallel processing completed in {overall_time:.2f}s')
-    print(f'📊 Processed: {total_stats["total_auctions"]:,} auctions, {total_stats["new_auctions"]:,} new')
+    print(f'📊 Scanned: {total_stats["total_auctions"]:,} auctions, {total_stats["new_auctions"]:,} new')
     print(f'💰 Found: {total_stats["profitable_flips"]:,} profitable flips')
     print(f'⚡ Efficiency: {total_stats.get("parallelization_efficiency", 0):.1f}% parallelization')
     
@@ -255,7 +267,12 @@ def delete_ended_auctions_optimized() -> int:
         url = get_api_url('https://api.hypixel.net/v2/skyblock/auctions_ended')
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-        data = orjson.loads(response.content)
+        
+        # Handle JSON parsing with potential encoding issues
+        try:
+            data = orjson.loads(response.content)
+        except orjson.JSONDecodeError:
+            data = response.json()  # Fallback to requests' built-in JSON decoder
         
         # Extract auction IDs
         ended_auction_ids = [auction['auction_id'] for auction in data.get('auctions', [])]
@@ -335,6 +352,90 @@ async def benchmark_parallel_performance(max_pages: int = 5) -> Dict[str, Any]:
             results[concurrency] = {'error': str(e)}
     
     return results
+
+async def reevaluate_all_existing_auctions() -> int:
+    """
+    Re-evaluate ALL existing auctions in the database for profit opportunities.
+    This is called during initial launch after price data is updated.
+    
+    Returns:
+        Number of profitable flips found from existing auctions
+    """
+    print("🔍 Fetching all existing auctions from database...")
+    start_time = time.perf_counter()
+    
+    try:
+        # Clear existing flips to avoid duplicates
+        print("🧹 Clearing old flip data...")
+        DataBaseHandler.flips.delete_many({})
+        
+        # Get all BIN auctions from database
+        cursor = DataBaseHandler.auctions.find(
+            {"bin": True}, 
+            {"item_bytes": 1, "uuid": 1, "name": 1, "tier": 1, "price": 1, "start": 1, "end": 1, "seller": 1}
+        )
+        
+        # Convert cursor to list and process in batches
+        all_auctions = list(cursor)
+        total_auctions = len(all_auctions)
+        
+        if total_auctions == 0:
+            print("ℹ️ No existing auctions found in database")
+            return 0
+        
+        print(f"📊 Re-evaluating {total_auctions:,} existing auctions...")
+        ProgressHandler.createpbar(total_auctions)
+        
+        # Process in batches to avoid memory issues
+        batch_size = 500
+        total_flips = 0
+        
+        for i in range(0, total_auctions, batch_size):
+            batch = all_auctions[i:i + batch_size]
+            
+            # Convert database format to auction format for evaluation
+            formatted_auctions = []
+            for auction in batch:
+                formatted_auction = {
+                    'uuid': auction['uuid'],
+                    'item_name': auction['name'],
+                    'tier': auction['tier'],
+                    'starting_bid': auction['price'],
+                    'item_bytes': auction['item_bytes'],
+                    'start': auction['start'],
+                    'end': auction['end'],
+                    'bin': True,
+                    'claimed': False
+                }
+                if 'seller' in auction:
+                    formatted_auction['auctioneer'] = auction['seller']
+                
+                formatted_auctions.append(formatted_auction)
+            
+            # Evaluate this batch
+            try:
+                batch_flips = await process_auctions_batch(formatted_auctions)
+                total_flips += batch_flips
+                
+                # Update progress
+                ProgressHandler.updatepbar(len(batch))
+                
+                print(f"✅ Batch {i//batch_size + 1}: {batch_flips} flips found")
+                
+            except Exception as e:
+                logging.error(f"Error processing re-evaluation batch {i//batch_size + 1}: {e}")
+                ProgressHandler.updatepbar(len(batch))
+        
+        ProgressHandler.deletepbar()
+        
+        processing_time = time.perf_counter() - start_time
+        print(f"✅ Re-evaluation completed: {total_flips:,} total profitable flips found in {processing_time:.2f}s")
+        
+        return total_flips
+        
+    except Exception as e:
+        logging.error(f"Error in reevaluate_all_existing_auctions: {e}")
+        return 0
 
 async def cleanup_session():
     """Clean up the global session."""

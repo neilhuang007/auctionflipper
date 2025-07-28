@@ -69,18 +69,40 @@ async def close_http_session():
 
 def decode_data_optimized(string: str) -> Optional[Dict]:
     """
-    Optimized NBT data decoding with error handling.
+    Optimized NBT data decoding with error handling and JSON serialization support.
     """
     try:
         # Decode the base64 string
         data = base64.b64decode(string)
         # Parse the NBT data
         nbt_file = nbtlib.File.load(BytesIO(data), gzipped=True)
-        # Convert the NBT file to a dictionary
-        return dict(nbt_file)
+        # Convert the NBT file to a dictionary and handle non-serializable types
+        return convert_nbt_to_serializable(dict(nbt_file))
     except Exception as error:
         logging.error(f"Error decoding NBT data: {error}")
         return None
+
+def convert_nbt_to_serializable(obj):
+    """
+    Convert NBT objects to JSON-serializable types.
+    """
+    if hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes)):
+        if isinstance(obj, dict):
+            return {k: convert_nbt_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_nbt_to_serializable(item) for item in obj]
+        else:
+            # Handle other iterables
+            return [convert_nbt_to_serializable(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        # Handle objects with attributes
+        return {k: convert_nbt_to_serializable(v) for k, v in obj.__dict__.items()}
+    elif isinstance(obj, (bytes, bytearray)):
+        # Convert bytes to list of integers or base64 string
+        return list(obj) if len(obj) < 100 else base64.b64encode(obj).decode('utf-8')
+    else:
+        # Return primitive types as-is
+        return obj
 
 def get_cache_key(item_bytes: str) -> str:
     """Generate cache key for item evaluation."""
@@ -154,8 +176,23 @@ async def evaluate_items_batch(items_data: List[Dict]) -> List[Dict]:
     try:
         start_time = time.perf_counter()
         
+        # Ensure all items_data is JSON serializable
+        serializable_items = []
+        for item in items_data:
+            try:
+                # Test serialization
+                json.dumps(item)
+                serializable_items.append(item)
+            except (TypeError, ValueError) as e:
+                logging.warning(f"Skipping non-serializable item: {e}")
+                continue
+        
+        if not serializable_items:
+            logging.warning("No serializable items in batch")
+            return []
+        
         payload = {
-            'items': items_data,
+            'items': serializable_items,
             'prices': PriceHandler.getprices()
         }
         
@@ -165,7 +202,7 @@ async def evaluate_items_batch(items_data: List[Dict]) -> List[Dict]:
                 result = await response.json()
                 
                 elapsed_time = time.perf_counter() - start_time
-                evaluation_stats['total_evaluations'] += len(items_data)
+                evaluation_stats['total_evaluations'] += len(serializable_items)
                 evaluation_stats['total_time'] += elapsed_time
                 evaluation_stats['profitable_found'] += len(result.get('profitable', []))
                 
@@ -251,6 +288,8 @@ async def process_auctions_batch(auctions: List[Dict]) -> int:
     if not auctions:
         return 0
     
+    logging.info(f"Processing batch of {len(auctions)} auctions")
+    
     # Prepare batch data
     items_data = []
     valid_auctions = []
@@ -275,7 +314,10 @@ async def process_auctions_batch(auctions: List[Dict]) -> int:
                 valid_auctions.append(auction)
     
     if not items_data:
+        logging.info("No valid items found for evaluation")
         return 0
+    
+    logging.info(f"Evaluating {len(items_data)} items in batch")
     
     # Evaluate all items in batch
     evaluation_results = await evaluate_items_batch(items_data)
@@ -310,9 +352,11 @@ async def process_auctions_batch(auctions: List[Dict]) -> int:
     if flips_to_insert:
         try:
             DataBaseHandler.flips.insert_many(flips_to_insert)
+            logging.info(f"Inserted {len(flips_to_insert)} profitable flips to database")
         except Exception as e:
             logging.error(f"Error bulk inserting flips: {e}")
     
+    logging.info(f"Batch processing complete: {profitable_count} profitable flips found")
     return profitable_count
 
 def get_evaluation_stats() -> Dict[str, Any]:
