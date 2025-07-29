@@ -23,7 +23,6 @@ from typing import Dict, Any
 
 import aiohttp
 import orjson
-import requests
 
 from Handlers import PriceHandler
 from Handlers.AuctionHandlerOptimized import check_auctions_parallel, delete_ended_auctions_optimized, cleanup_session

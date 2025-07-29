@@ -1,5 +1,5 @@
 {
-  "hypixel_api_key": "7c7339cb-f18c-4946-a22f-94a4ca1d5c4f",
+  "hypixel_api_key": "",
   "mongodb_url": "mongodb://localhost:27017",
   "database_name": "skyblock",
   "evaluation_service": {

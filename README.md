@@ -56,6 +56,7 @@ AuctionFlipper continuously monitors the Hypixel Skyblock auction house to ident
   - `tqdm` - Progress bars
 
 - **Node.js 14+** with dependencies:
+  - `express` - HTTP server framework
   - `mongodb` - MongoDB client
   - `skyhelper-networth` - Item valuation
   - `prismarine-nbt` - NBT parsing
@@ -199,6 +200,7 @@ Override any configuration using environment variables:
 - **Parallel page processing** with configurable concurrency
 - **Intelligent caching** reduces redundant evaluations
 - **Connection pooling** minimizes HTTP overhead
+- **Complete re-evaluation on startup** - All existing auctions are re-evaluated with latest prices
 
 ### Database Optimization
 The optimized version automatically creates these indexes:
@@ -207,6 +209,78 @@ The optimized version automatically creates these indexes:
 - `bin` - Quick filtering of Buy-It-Now auctions
 - `tier, price` - Optimized auction queries
 - `timestamp` - Efficient flip tracking
+
+## 📋 Application Workflow
+
+### Initial Launch Process
+1. **Update price data** - Fetch latest prices, lowest BIN, and daily sales data
+2. **Fetch new auctions** - Get all current auctions from Hypixel API
+3. **Filter and store** - Save new BIN auctions to database
+4. **Evaluate new auctions** - Calculate profitability for new items
+5. **🔄 Re-evaluate ALL existing auctions** - Check all stored auctions with updated prices
+6. **Store profitable flips** - Save all profitable opportunities to database
+
+### Monitoring Mode Process
+1. **Update prices** (every 5 cycles) - Keep price data current
+2. **Scan all auction pages** - Check all pages for new auction listings
+3. **Filter new auctions** - Only process auctions not already in database
+4. **Evaluate new items** - Calculate profitability for newly discovered auctions
+5. **Cleanup expired** - Remove ended auctions from database
+
+> **Why scan all pages?** Hypixel auction pages are not sorted chronologically - new auctions can appear on any page, so we must check all pages to avoid missing profitable opportunities.
+
+> **Performance note:** Even though we fetch all pages, we only **evaluate** new auctions (not in database). Most auctions are already processed, so evaluation time remains low while ensuring complete coverage.
+
+> **Why re-evaluate everything on startup?** Price data changes frequently, so auctions that weren't profitable yesterday might be profitable today with updated market prices.
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### Evaluation Service Won't Start
+```bash
+# Check if Node.js dependencies are installed
+npm install
+
+# Manually test the service
+node EvaluatorService.js
+
+# Check if port 3000 is available
+netstat -ano | findstr :3000
+```
+
+#### Character Encoding Issues
+If you see `'gbk' codec can't decode byte` errors:
+- The startup script automatically handles encoding issues
+- If problems persist, run with `--skip-db-setup` flag
+- Check Windows system locale settings
+
+#### JSON Parsing Issues
+If you see `unexpected mimetype: text/plain` errors:
+- The optimized version automatically handles mimetype issues
+- This occurs when external APIs return JSON with incorrect Content-Type headers
+- The system now falls back to manual JSON parsing when needed
+
+#### MongoDB Connection Issues
+```bash
+# Verify MongoDB is running
+mongosh
+
+# Check connection in logs
+python start_optimized.py --mode service-only
+```
+
+#### API Rate Limiting
+- Configure your Hypixel API key for better rate limits
+- Current endpoints used:
+  - `https://api.hypixel.net/skyblock/auctions` (public, no key required)
+  - `https://api.hypixel.net/v2/skyblock/auctions_ended` (public, no key required)
+- With API key: Higher rate limits and priority access
+
+### Performance Tips
+- **Increase `max_concurrent_pages`** for faster processing (uses more CPU/memory)
+- **Decrease `cache_ttl_seconds`** for more accurate but slower evaluation
+- **Monitor memory usage** - reduce concurrency if system becomes unstable
 
 ## 📊 Database Schema
 
